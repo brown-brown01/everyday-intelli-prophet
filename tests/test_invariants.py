@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from prophet_arena.bayes import Belief, Forecast
 from prophet_arena.config import Config
 from prophet_arena.families import _parse_joint, check_coherence, group_by_family
-from prophet_arena.strategy import DrawdownState, decide
+from prophet_arena.strategy import DrawdownState, choose_risk_fraction, decide
 
 
 def _mkt(market_id, family=None, topic=None):
@@ -83,41 +83,58 @@ def _belief(p):
 
 
 def test_notional_never_exceeds_per_market_cap():
+    per_trade_cap = 500.0
     cfg = Config()
     d = decide("m", _belief(0.97), best_bid=0.18, best_ask=0.20,
-               bankroll=10_000_000, cfg=cfg)
+               bankroll=10_000_000, cfg=cfg, per_trade_cap=per_trade_cap)
     assert d is not None
-    assert d.shares * d.price <= cfg.max_notional_per_market + 1e-6
+    assert d.shares * d.price <= per_trade_cap + 1e-6
 
 
 def test_notional_never_exceeds_gross_room():
     d = decide("m", _belief(0.97), best_bid=0.18, best_ask=0.20,
-               bankroll=10_000_000, cfg=Config(), gross_room=50.0)
+               bankroll=10_000_000, cfg=Config(), per_trade_cap=500.0, gross_room=50.0)
     assert d is not None
     assert d.shares * d.price <= 50.0 + 1e-6
 
 
 def test_drawdown_shrinks_position():
     cfg = Config()
-    # bankroll small enough that neither hits the $1k notional cap,
+    # bankroll small enough that neither hits the per-trade notional cap,
     # so the drawdown multiplier is actually visible.
     flat = decide("m", _belief(0.95), 0.28, 0.30, 4_000, cfg,
+                  per_trade_cap=1_000.0,
                   dd_state=DrawdownState(current_dd=0.0, dd_max=0.25))
     bleeding = decide("m", _belief(0.95), 0.28, 0.30, 4_000, cfg,
+                      per_trade_cap=1_000.0,
                       dd_state=DrawdownState(current_dd=0.20, dd_max=0.25))
     assert flat is not None and bleeding is not None
     assert bleeding.shares < flat.shares
 
 
 def test_tiny_bankroll_returns_none():
-    assert decide("m", _belief(0.95), 0.28, 0.30, bankroll=0.10, cfg=Config()) is None
+    assert decide(
+        "m", _belief(0.95), 0.28, 0.30, bankroll=0.10, cfg=Config(), per_trade_cap=100.0
+    ) is None
 
 
 def test_decision_price_always_valid():
     cfg = Config()
-    yes = decide("m", _belief(0.95), 0.40, 0.45, 100_000, cfg)
-    no = decide("m", _belief(0.05), 0.55, 0.60, 100_000, cfg)
+    yes = decide("m", _belief(0.95), 0.40, 0.45, 100_000, cfg, per_trade_cap=1_000.0)
+    no = decide("m", _belief(0.05), 0.55, 0.60, 100_000, cfg, per_trade_cap=1_000.0)
     for d in (yes, no):
         assert d is not None
         assert 0.0 < d.price < 1.0
         assert d.shares > 0
+
+
+def test_choose_risk_fraction_at_peak_returns_max():
+    assert choose_risk_fraction(0.0, 0.10, 0.15) == 0.15
+
+
+def test_choose_risk_fraction_deep_dd_returns_min():
+    assert choose_risk_fraction(0.20, 0.10, 0.15) == 0.10
+
+
+def test_choose_risk_fraction_interpolates():
+    assert abs(choose_risk_fraction(0.05, 0.10, 0.15) - 0.125) < 1e-9

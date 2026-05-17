@@ -23,7 +23,7 @@ from .bayes import temper
 from .config import DATA_DIR, Config, load_config
 from .families import JointForecaster
 from .pomdp import RegimePOMDP, evict_stale, load_states, save_states
-from .strategy import DrawdownState, decide
+from .strategy import DrawdownState, choose_risk_fraction, decide
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,8 +88,6 @@ def _run_tick(
         for pos in portfolio.positions:
             held[pos.market_id] = pos.side
             gross += abs(float(pos.shares) * float(pos.avg_entry_price))
-    gross_room = max(0.0, ruleset.MAX_GROSS_EXPOSURE - gross)
-    trade_cap = min(cfg.max_trades_per_tick, ruleset.MAX_TRADES_PER_TICK)
 
     # Drawdown vs. peak equity (unrealized + realized — bleeding books shrink Kelly).
     slug = cfg.slug
@@ -100,6 +98,23 @@ def _run_tick(
     dd_state = DrawdownState(current_dd=dd, dd_max=cfg.dd_max)
     if dd > 0:
         logger.info("Drawdown %.2f%% (peak $%.0f, equity $%.0f)", dd * 100, peak, equity)
+    risk_f = choose_risk_fraction(dd, cfg.risk_fraction_min, cfg.risk_fraction_max)
+    budget_from_equity = equity * risk_f
+    max_api_exposure = ruleset.MAX_GROSS_EXPOSURE * cfg.api_safety_margin
+    remaining_api_room = max_api_exposure - gross
+    exposure_budget = max(0.0, min(budget_from_equity, remaining_api_room))
+    per_trade_cap = equity * cfg.per_trade_risk_cap
+    trade_cap = min(cfg.max_trades_per_tick, ruleset.MAX_TRADES_PER_TICK)
+    logger.info(
+        "Sizing: equity=$%.0f existing_gross=$%.0f risk_f=%.3f "
+        "exposure_budget=$%.0f per_trade_cap=$%.0f api_room=$%.0f",
+        equity,
+        gross,
+        risk_f,
+        exposure_budget,
+        per_trade_cap,
+        remaining_api_room,
+    )
 
     # ── Pass 1: forecast + provisionally decide for EVERY market ──
     # The provisional decision is unconstrained by remaining gross room
@@ -146,6 +161,7 @@ def _run_tick(
         }
         prov = decide(
             m.market_id, belief, bid, ask, bankroll, cfg,
+            per_trade_cap=per_trade_cap,
             held_side=held.get(m.market_id), dd_state=dd_state,
         )
         evaluated.append({"m": m, "bid": bid, "ask": ask,
@@ -164,8 +180,10 @@ def _run_tick(
                 len(evaluated), len(tradable), min(len(tradable), trade_cap))
 
     intents: list[TradeIntentRequest] = []
+    planned_exposure = 0.0
     for e in tradable:
-        if len(intents) >= trade_cap or gross_room <= 0:
+        remaining_budget = exposure_budget - planned_exposure
+        if len(intents) >= trade_cap or remaining_budget <= 0:
             break
         m, rec = e["m"], e["rec"]
         opening_new = m.market_id not in held
@@ -175,7 +193,8 @@ def _run_tick(
         # Re-size against the capital still unspent this tick.
         d = decide(
             m.market_id, e["belief"], e["bid"], e["ask"], bankroll, cfg,
-            held_side=held.get(m.market_id), gross_room=gross_room,
+            per_trade_cap=per_trade_cap,
+            held_side=held.get(m.market_id), gross_room=remaining_budget,
             dd_state=dd_state,
         )
         if d is None:
@@ -184,13 +203,20 @@ def _run_tick(
             market_id=d.market_id, action=d.action, side=d.side,
             shares=str(d.shares), idempotency_key="",
         ))
-        gross_room -= d.shares * d.price
+        planned_exposure += d.shares * d.price
         if opening_new:
             held[m.market_id] = d.side
         rec.update(action=f"BUY {d.side}", shares=d.shares,
                    price=round(d.price, 4), edge=round(d.edge, 4),
                    rank=len(intents))
         logger.info("  #%d  %s", len(intents), d.rationale)
+    logger.info(
+        "Planned %d trades, planned_exposure=$%.0f, total_if_filled=$%.0f (api_cap=$%.0f)",
+        len(intents),
+        planned_exposure,
+        gross + planned_exposure,
+        ruleset.MAX_GROSS_EXPOSURE,
+    )
 
     audit: list[dict] = [e["rec"] for e in evaluated]
 

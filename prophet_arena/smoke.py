@@ -59,6 +59,7 @@ def run(n_markets: int = 30) -> None:
 
     # ── 3. temper + decide + edge ranking ──
     ctrl = controller.ControllerState(alpha=cfg.llm_weight)
+    per_trade_cap = cfg.starting_cash * cfg.per_trade_risk_cap
     decisions = []
     for m in markets:
         bid, ask = float(m.quote.best_bid), float(m.quote.best_ask)
@@ -66,7 +67,10 @@ def run(n_markets: int = 30) -> None:
         belief = temper(prior, forecasts[m.market_id], ctrl.alpha, cfg.llm_temperature)
         if not (0.0 < belief.p_yes < 1.0):
             _fail(f"{m.market_id}: tempered p_yes={belief.p_yes} out of range")
-        d = decide(m.market_id, belief, bid, ask, cfg.starting_cash, cfg)
+        d = decide(
+            m.market_id, belief, bid, ask, cfg.starting_cash, cfg,
+            per_trade_cap=per_trade_cap,
+        )
         if d is not None:
             decisions.append(d)
     decisions.sort(key=lambda d: d.edge, reverse=True)
@@ -78,7 +82,7 @@ def run(n_markets: int = 30) -> None:
     intents = []
     for d in top:
         notional = d.shares * d.price
-        if notional > cfg.max_notional_per_market + 1e-6:
+        if notional > per_trade_cap + 1e-6:
             _fail(f"{d.market_id}: notional ${notional:.0f} exceeds per-market cap")
         if d.shares < cfg.min_shares:
             _fail(f"{d.market_id}: {d.shares} shares below minimum")
@@ -86,7 +90,7 @@ def run(n_markets: int = 30) -> None:
             market_id=d.market_id, action=d.action, side=d.side,
             shares=str(d.shares), idempotency_key="",
         ))
-    print(f"  [4] risk caps OK — {len(intents)} intents, all within $1k/market")
+    print(f"  [4] risk caps OK — {len(intents)} intents, all within per-trade risk cap")
 
     # ── 5. adaptive controller (isolated temp state) ──
     with tempfile.TemporaryDirectory() as tmp:

@@ -10,6 +10,7 @@ BUY NO fills at ``1 - best_bid``. Each share pays $1 if its side wins.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .bayes import Belief
@@ -53,6 +54,22 @@ def kelly_drawdown_adjustment(dd: float, dd_max: float = 0.25) -> float:
     return max(0.0, 1.0 - float(dd) / float(dd_max))
 
 
+def choose_risk_fraction(dd: float, f_min: float, f_max: float) -> float:
+    """Adaptive risk-fraction in [f_min, f_max] based on drawdown.
+
+    At peak (dd <= 0), run at ``f_max``. At deep drawdown (dd >= 10%),
+    run at ``f_min``. Between those points, interpolate linearly.
+    """
+    if f_max <= f_min:
+        return f_min
+    if dd <= 0.0:
+        return f_max
+    if dd >= 0.10:
+        return f_min
+    # Interpolate from f_max -> f_min over dd in [0.0, 0.10].
+    return f_max - (f_max - f_min) * (dd / 0.10)
+
+
 def decide(
     market_id: str,
     belief: Belief,
@@ -61,6 +78,7 @@ def decide(
     bankroll: float,
     cfg: Config,
     *,
+    per_trade_cap: float,
     held_side: str | None = None,
     gross_room: float | None = None,
     dd_state: DrawdownState | None = None,
@@ -98,10 +116,10 @@ def decide(
     )
     frac = cfg.kelly_fraction * kelly * shrink * dd_mult
 
-    notional = min(frac * bankroll, cfg.max_notional_per_market)
+    notional = min(frac * bankroll, per_trade_cap)
     if gross_room is not None:
         notional = min(notional, max(0.0, gross_room))
-    shares = int(notional / max(price, 0.01))
+    shares = math.floor(notional / max(price, 0.01))
     if shares < cfg.min_shares:
         return None
 

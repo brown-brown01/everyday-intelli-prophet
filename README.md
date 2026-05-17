@@ -75,8 +75,10 @@ information rather than stale training knowledge.
 **Trading.** `strategy.decide()` trades a market only when expected value per
 share clears `EV_THRESHOLD`, sizes with fractional Kelly (`KELLY_FRACTION`),
 and shrinks for forecast uncertainty and portfolio drawdown. Candidate trades
-are ranked by edge; the top `MAX_TRADES_PER_TICK` are submitted, all within the
-$1k/market and $10k gross exposure caps.
+are ranked by edge; the top `MAX_TRADES_PER_TICK` are submitted with layered
+caps: per-tick exposure budget (`RISK_FRACTION_MIN/MAX`) and per-trade cap
+(`PER_TRADE_RISK_CAP`), while keeping a safety margin under the $10k API hard
+cap (`API_SAFETY_MARGIN`).
 
 **Adaptive controller.** Markets rarely resolve inside a 2-week window, so
 resolution outcomes give no usable signal. Instead the controller measures, in
@@ -98,6 +100,10 @@ Set in `.env` (copy from `.env.example`):
 | `LLM_WEIGHT` | `0.7` | Opinion-pool weight on the LLM vs the market |
 | `EV_THRESHOLD` | `0.05` | Minimum edge per share to trade |
 | `KELLY_FRACTION` | `0.25` | Fraction of full Kelly to stake |
+| `RISK_FRACTION_MIN` | `0.10` | Minimum total new exposure fraction (deep drawdown) |
+| `RISK_FRACTION_MAX` | `0.15` | Maximum total new exposure fraction (near peak equity) |
+| `PER_TRADE_RISK_CAP` | `0.05` | Max per-trade notional as a fraction of equity |
+| `API_SAFETY_MARGIN` | `0.97` | Keep gross below this fraction of the $10k API cap |
 
 ## Running
 

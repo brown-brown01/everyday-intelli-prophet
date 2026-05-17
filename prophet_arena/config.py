@@ -80,7 +80,10 @@ class Config:
     # ── Trading / sizing ──
     ev_threshold: float = 0.05
     kelly_fraction: float = 0.25
-    max_notional_per_market: float = 1_000.0
+    risk_fraction_min: float = 0.10
+    risk_fraction_max: float = 0.15
+    per_trade_risk_cap: float = 0.05
+    api_safety_margin: float = 0.97
     max_trades_per_tick: int = 20
     min_shares: int = 1
 
@@ -112,6 +115,10 @@ class Config:
             "llm_temperature_source": self.llm_temperature_source,
             "ev_threshold": self.ev_threshold,
             "kelly_fraction": self.kelly_fraction,
+            "risk_fraction_min": self.risk_fraction_min,
+            "risk_fraction_max": self.risk_fraction_max,
+            "per_trade_risk_cap": self.per_trade_risk_cap,
+            "api_safety_margin": self.api_safety_margin,
             "prune_samples": self.prune_samples,
             "prune_min_distance": self.prune_min_distance,
             "regime_enabled": self.regime_enabled,
@@ -165,7 +172,10 @@ def load_config() -> Config:
         llm_temperature=llm_temp,
         ev_threshold=_env_f("EV_THRESHOLD", 0.05),
         kelly_fraction=_env_f("KELLY_FRACTION", 0.25),
-        max_notional_per_market=_env_f("MAX_NOTIONAL_PER_MARKET", 1_000.0),
+        risk_fraction_min=_env_f("RISK_FRACTION_MIN", 0.10),
+        risk_fraction_max=_env_f("RISK_FRACTION_MAX", 0.15),
+        per_trade_risk_cap=_env_f("PER_TRADE_RISK_CAP", 0.05),
+        api_safety_margin=_env_f("API_SAFETY_MARGIN", 0.97),
         max_trades_per_tick=_env_i("MAX_TRADES_PER_TICK", 20),
         min_shares=_env_i("MIN_SHARES", 1),
         prune_samples=_env_b("PRUNE_SAMPLES", False),

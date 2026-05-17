@@ -141,11 +141,15 @@ def _report(rows: list[dict], cfg: Config) -> dict:
     # ── synthetic trading sim against a uniform-prior market ──
     staked = pnl = 0.0
     trades = wins = 0
+    per_trade_cap = cfg.starting_cash * cfg.per_trade_risk_cap
     for r in rows:
         prior = r["prior"]
         bid = max(0.02, min(0.98, prior - SPREAD / 2))
         ask = max(0.02, min(0.98, prior + SPREAD / 2))
-        d = decide(r["q"].id, r["belief"], bid, ask, cfg.starting_cash, cfg)
+        d = decide(
+            r["q"].id, r["belief"], bid, ask, cfg.starting_cash, cfg,
+            per_trade_cap=per_trade_cap,
+        )
         if not d:
             continue
         trades += 1

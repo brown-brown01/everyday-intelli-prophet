@@ -371,13 +371,15 @@ class TestDrawdownAdjustedKelly:
 
     def test_decide_with_dd_halves_shares_at_half_dd(self):
         cfg = _cfg(ev_threshold=0.0, kelly_fraction=1.0,
-                   max_notional_per_market=1e9, min_shares=1, dd_max=0.25)
+                   min_shares=1, dd_max=0.25)
         belief = self._belief(0.8, uncertainty=0.01)
         bid, ask, bankroll = 0.49, 0.50, 100_000.0
-        d_full = decide("m1", belief, bid, ask, bankroll, cfg)
+        d_full = decide("m1", belief, bid, ask, bankroll, cfg, per_trade_cap=1e9)
         d_half = decide("m1", belief, bid, ask, bankroll, cfg,
+                        per_trade_cap=1e9,
                         dd_state=DrawdownState(current_dd=0.125, dd_max=0.25))
         d_zero = decide("m1", belief, bid, ask, bankroll, cfg,
+                        per_trade_cap=1e9,
                         dd_state=DrawdownState(current_dd=0.25, dd_max=0.25))
         assert d_full is not None and d_half is not None
         assert d_zero is None  # 0 shares → no decision
@@ -388,8 +390,8 @@ class TestDrawdownAdjustedKelly:
         cfg = _cfg(ev_threshold=0.0, kelly_fraction=0.25, min_shares=1)
         belief = self._belief(0.7)
         bid, ask, bankroll = 0.49, 0.50, 10_000.0
-        d_a = decide("m", belief, bid, ask, bankroll, cfg)
-        d_b = decide("m", belief, bid, ask, bankroll, cfg, dd_state=None)
+        d_a = decide("m", belief, bid, ask, bankroll, cfg, per_trade_cap=1e9)
+        d_b = decide("m", belief, bid, ask, bankroll, cfg, per_trade_cap=1e9, dd_state=None)
         assert d_a is not None and d_b is not None
         assert d_a.shares == d_b.shares
 
