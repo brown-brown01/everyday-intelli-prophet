@@ -1,0 +1,8 @@
+# everyday-intelli-prophet — runtime + test dependencies
+ai-prophet-core>=0.1.5     # typed Prophet Arena SDK (ServerAPIClient, BenchmarkSession)
+ai-prophet>=0.1.5          # CLI: sample datasets (`prophet forecast retrieve`) + dashboard
+openai>=2.0.0              # OpenAI-compatible client for the LLM forecaster (via OpenRouter)
+numpy>=1.26.0              # Bayesian core — log-odds math
+scipy>=1.12.0              # calibration-curve fitting
+python-dotenv>=1.0.0       # .env loading
+pytest>=8.0.0              # test suite

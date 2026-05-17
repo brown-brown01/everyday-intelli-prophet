@@ -1,0 +1,9 @@
+[project]
+name = "everyday-intelli-prophet"
+version = "1.0.0"
+description = "Prophet Arena custom trading agent — research-grounded LLM forecaster with Bayesian tempering"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
