@@ -87,6 +87,13 @@ class Config:
     max_trades_per_tick: int = 20
     min_shares: int = 1
 
+    # ── Position exit (long-only: SELL only ever closes a held side) ──
+    exit_enabled: bool = False        # EXIT_ENABLED — master switch
+    exit_edge_floor: float = -0.02    # close once residual edge <= this
+    take_profit_pct: float = 0.0      # 0 disables (e.g. 0.25 = +25%)
+    stop_loss_pct: float = 0.0        # 0 disables (e.g. 0.15 = -15%)
+    max_exits_per_tick: int = 20      # MAX_EXITS_PER_TICK
+
     # ── Tier-1 math additions ──
     prune_samples: bool = False                              # PRUNE_SAMPLES
     prune_min_distance: float = 0.02                         # PRUNE_MIN_DISTANCE
@@ -178,6 +185,11 @@ def load_config() -> Config:
         api_safety_margin=_env_f("API_SAFETY_MARGIN", 0.97),
         max_trades_per_tick=_env_i("MAX_TRADES_PER_TICK", 20),
         min_shares=_env_i("MIN_SHARES", 1),
+        exit_enabled=_env_b("EXIT_ENABLED", False),
+        exit_edge_floor=_env_f("EXIT_EDGE_FLOOR", -0.02),
+        take_profit_pct=_env_f("TAKE_PROFIT_PCT", 0.0),
+        stop_loss_pct=_env_f("STOP_LOSS_PCT", 0.0),
+        max_exits_per_tick=_env_i("MAX_EXITS_PER_TICK", 20),
         prune_samples=_env_b("PRUNE_SAMPLES", False),
         prune_min_distance=_env_f("PRUNE_MIN_DISTANCE", 0.02),
         regime_enabled=_env_b("REGIME_ENABLED", False),

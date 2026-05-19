@@ -130,3 +130,41 @@ def decide(
         f"kelly={kelly:.3f}x{shrink:.2f}{dd_note}  {shares} sh"
     )
     return Decision(market_id, "BUY", side, shares, price, edge, kelly, p, rationale)
+
+
+@dataclass
+class ExitDecision:
+    """Close an existing position by SELLing the held side. Never opens
+    a new or opposite side — the close-side counterpart of decide()."""
+    market_id: str
+    side: str       # side currently held — this is what we SELL
+    shares: int
+    price: float    # current mark, for logging only
+    reason: str
+
+
+def decide_exit(market_id, belief, held_side, held_shares,
+                avg_entry, current_mark, cfg):
+    """Return an ExitDecision to close a held position, or None to hold."""
+    side = held_side.upper()
+    shares = int(float(held_shares))
+    if shares < cfg.min_shares:
+        return None
+    mark = max(0.01, min(0.99, float(current_mark)))
+    entry = max(1e-6, float(avg_entry))
+    p = belief.p_yes
+
+    fair = p if side == "YES" else (1.0 - p)   # fair value of the side we hold
+    residual_edge = fair - mark                # >0 => still underpriced, keep
+    pnl_frac = (mark - entry) / entry
+
+    reason = None
+    if residual_edge <= cfg.exit_edge_floor:
+        reason = f"edge gone (fair={fair:.3f} mark={mark:.3f})"
+    elif cfg.take_profit_pct > 0 and pnl_frac >= cfg.take_profit_pct:
+        reason = f"take-profit ({pnl_frac*100:+.0f}%)"
+    elif cfg.stop_loss_pct > 0 and pnl_frac <= -cfg.stop_loss_pct:
+        reason = f"stop-loss ({pnl_frac*100:+.0f}%)"
+    if reason is None:
+        return None
+    return ExitDecision(market_id, side, shares, mark, reason)

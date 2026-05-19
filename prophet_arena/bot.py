@@ -23,7 +23,7 @@ from .bayes import temper
 from .config import DATA_DIR, Config, load_config
 from .families import JointForecaster
 from .pomdp import RegimePOMDP, evict_stale, load_states, save_states
-from .strategy import DrawdownState, choose_risk_fraction, decide
+from .strategy import DrawdownState, choose_risk_fraction, decide, decide_exit
 
 logging.basicConfig(
     level=logging.INFO,
@@ -167,14 +167,40 @@ def _run_tick(
         evaluated.append({"m": m, "bid": bid, "ask": ask,
                           "belief": belief, "rec": rec, "prov": prov})
 
+    # ── Exit pass: close held positions whose forecast edge is gone ──
+    exit_intents: list[TradeIntentRequest] = []
+    exiting: set[str] = set()
+    if cfg.exit_enabled and portfolio:
+        by_market = {e["m"].market_id: e for e in evaluated}
+        for pos in portfolio.positions:
+            if len(exit_intents) >= cfg.max_exits_per_tick:
+                break
+            ev = by_market.get(pos.market_id)
+            if ev is None:
+                continue  # not in this tick's snapshot — no fresh forecast
+            x = decide_exit(pos.market_id, ev["belief"], pos.side,
+                            float(pos.shares), float(pos.avg_entry_price),
+                            float(pos.current_price), cfg)
+            if x is None:
+                continue
+            exit_intents.append(TradeIntentRequest(
+                market_id=x.market_id, action="SELL", side=x.side,
+                shares=str(x.shares), idempotency_key=""))
+            exiting.add(x.market_id)
+            held.pop(x.market_id, None)
+            ev["rec"].update(action=f"SELL {x.side}", shares=x.shares)
+            logger.info("  EXIT %s %s x%d — %s",
+                        x.side, x.market_id, x.shares, x.reason)
+
     # ── Pass 2: rank tradable markets by edge, submit the strongest ──
     # With a hard per-tick trade cap, the cap must be spent on our best
     # edges — not on whichever markets happened to come first.
     tradable = sorted(
-        (e for e in evaluated if e["prov"] is not None),
-        key=lambda e: e["prov"].edge,
-        reverse=True,
+        (e for e in evaluated
+         if e["prov"] is not None and e["m"].market_id not in exiting),
+        key=lambda e: e["prov"].edge, reverse=True,
     )
+    buy_cap = max(0, trade_cap - len(exit_intents))
     logger.info("Evaluated %d markets — %d clear the EV threshold; "
                 "submitting top %d by edge",
                 len(evaluated), len(tradable), min(len(tradable), trade_cap))
@@ -183,7 +209,7 @@ def _run_tick(
     planned_exposure = 0.0
     for e in tradable:
         remaining_budget = exposure_budget - planned_exposure
-        if len(intents) >= trade_cap or remaining_budget <= 0:
+        if len(intents) >= buy_cap or remaining_budget <= 0:
             break
         m, rec = e["m"], e["rec"]
         opening_new = m.market_id not in held
@@ -222,14 +248,16 @@ def _run_tick(
 
     session.put_plan(lease, idx, {"backend": cfg.resolved_backend(), "forecasts": audit})
 
-    if intents:
-        result = session.submit_intents(lease, idx, intents)
-        logger.info("Submitted %d intents — %d accepted, %d rejected",
-                    len(intents), result.accepted, result.rejected)
+    all_intents = exit_intents + intents
+    if all_intents:
+        result = session.submit_intents(lease, idx, all_intents)
+        logger.info("Submitted %d (%d exits, %d buys) — %d ok, %d rejected",
+                    len(all_intents), len(exit_intents), len(intents),
+                    result.accepted, result.rejected)
         for r in result.rejections:
             logger.warning("  rejected %s: %s", r.intent_id, r.reason)
     else:
-        logger.info("No trades cleared the EV threshold this tick.")
+        logger.info("No exits or trades this tick.")
 
     session.finalize(lease, idx)
     session.complete_tick(lease)
